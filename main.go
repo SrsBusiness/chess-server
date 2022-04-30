@@ -16,6 +16,8 @@ func main() {
 
 	// Routes
 	e.GET("/", chess_server.Hello)
-	//e.GET("/find_match", find_match)
+	e.GET("/find_match", chess_server.FindMatch)
 
+	// Start server
+	e.Logger.Fatal(e.Start(":1323"))
 }
