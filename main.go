@@ -1,9 +1,8 @@
-package chess_server
+package main
 
 import (
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"net/http"
+	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 )
 
 func main() {
@@ -15,18 +14,7 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// Routes
-	e.GET("/", hello)
-	e.GET("/find_match", find_match)
+	//e.GET("/", foo.hello)
+	//e.GET("/find_match", find_match)
 
-	// Start server
-	e.Logger.Fatal(e.Start(":1323"))
-}
-
-// Handler
-func hello(c echo.Context) error {
-	return c.String(http.StatusOK, "Hello, World!")
-}
-
-func find_match(c echo.Context) error {
-	return c.String(http.StatusOK, "Finding Match")
 }
