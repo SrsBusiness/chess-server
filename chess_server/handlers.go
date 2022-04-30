@@ -1,4 +1,4 @@
-package chessserver
+package chess_server
 
 import (
 	"net/http"
@@ -7,10 +7,10 @@ import (
 )
 
 // Handler
-func hello(c echo.Context) error {
+func Hello(c echo.Context) error {
 	return c.String(http.StatusOK, "Hello, World!")
 }
 
-func find_match(c echo.Context) error {
+func FindMatch(c echo.Context) error {
 	return c.String(http.StatusOK, "Finding Match")
 }

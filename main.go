@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
+	chess_server "github.com/SrsBusiness/chess_server/chess_server"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
@@ -14,7 +15,7 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// Routes
-	//e.GET("/", foo.hello)
+	e.GET("/", chess_server.Hello)
 	//e.GET("/find_match", find_match)
 
 }
