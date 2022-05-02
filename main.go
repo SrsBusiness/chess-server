@@ -7,10 +7,21 @@ import (
 )
 
 func main() {
+	// Start Backend
+	var server chess_server.ChessServer
+	server.Init()
+	go server.MatchMaking.Run()
+
 	// Echo instance
 	e := echo.New()
 
 	// Middleware
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			cc := &chess_server.ChessServerContext{Context: c, Server: &server}
+			return next(cc)
+		}
+	})
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 

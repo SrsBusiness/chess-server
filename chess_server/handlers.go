@@ -15,7 +15,29 @@ func Hello(c echo.Context) error {
 	return c.String(http.StatusOK, "Hello, World!")
 }
 
+type GameIdResponse struct {
+	T      string `json: "type" xml: "type"`
+	GameId uint64 `json: "game_id" xml: "game_id"`
+}
+
+// Make asynchronous?
 func FindMatch(c echo.Context) error {
+	cc := c.(*ChessServerContext)
+	response := make(chan uint64)
+	cc.Server.MatchMaking.FindMatch(&response)
+
+	gameId := <-response
+
+	responseJSON := &GameIdResponse{
+		T:      "game_id_response",
+		GameId: gameId,
+	}
+	return cc.JSON(http.StatusOK, responseJSON)
+}
+
+func GameWIP(c echo.Context) error {
+	//server := websocket.Server()
+
 	//return c.String(http.StatusOK, "Finding Match")
 	websocket.Handler(func(ws *websocket.Conn) {
 		defer ws.Close()
