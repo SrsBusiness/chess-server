@@ -237,6 +237,10 @@ func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error 
 	}
 	if playerId == game.WhitePlayerId {
 		game.WhitePlayerJoined = true
+		game.WhitePlayerStream = make(chan struct {
+			GameUpdate
+			string
+		}, 128)
 		game.WhitePlayerStream <- struct {
 			GameUpdate
 			string
@@ -244,6 +248,10 @@ func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error 
 	}
 	if playerId == game.BlackPlayerId {
 		game.BlackPlayerJoined = true
+		game.BlackPlayerStream = make(chan struct {
+			GameUpdate
+			string
+		}, 128)
 		game.BlackPlayerStream <- struct {
 			GameUpdate
 			string
@@ -262,6 +270,13 @@ func (g *ChessGamesController) playerLeave(gameId uint64, playerId uint64) error
 		PlayerId: playerId,
 	}
 	game.BroadcastUpdate(playerLeftUpdate, "player_left_update")
+	if playerId == game.WhitePlayerId {
+		close(game.WhitePlayerStream)
+		game.WhitePlayerStream = nil
+	} else {
+		close(game.BlackPlayerStream)
+		game.BlackPlayerStream = nil
+	}
 	return nil
 }
 
@@ -332,10 +347,16 @@ func (g *ChessGame) BroadcastUpdate(update GameUpdate, T string) {
 		GameUpdate
 		string
 	}{update, T}
-	g.WhitePlayerStream <- updateMsg
-	g.BlackPlayerStream <- updateMsg
+	if g.WhitePlayerStream != nil {
+		g.WhitePlayerStream <- updateMsg
+	}
+	if g.BlackPlayerStream != nil {
+		g.BlackPlayerStream <- updateMsg
+	}
 	for _, c := range g.SpectatorStreams {
-		c <- updateMsg
+		if c != nil {
+			c <- updateMsg
+		}
 	}
 }
 
@@ -394,18 +415,12 @@ func (g *ChessGamesController) addNewGame() *ChessGame {
 	gameId := g.NextAvailGameId
 	g.NextAvailGameId += 1
 	newGame := ChessGame{
-		GameState:     chess.NewGame(),
-		GameId:        gameId,
-		WhitePlayerId: g.NextAvailPlayerId,
-		BlackPlayerId: g.NextAvailPlayerId + 1,
-		WhitePlayerStream: make(chan struct {
-			GameUpdate
-			string
-		}, 128),
-		BlackPlayerStream: make(chan struct {
-			GameUpdate
-			string
-		}, 128),
+		GameState:         chess.NewGame(),
+		GameId:            gameId,
+		WhitePlayerId:     g.NextAvailPlayerId,
+		BlackPlayerId:     g.NextAvailPlayerId + 1,
+		WhitePlayerStream: nil,
+		BlackPlayerStream: nil,
 		WhitePlayerJoined: false,
 		BlackPlayerJoined: false,
 		SpectatorStreams: make(map[uint64]chan struct {
