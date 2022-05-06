@@ -11,7 +11,7 @@ import (
 func FindMatch(c echo.Context) error {
 	cc := c.(*ChessServerContext)
 	response := make(chan MatchFoundResponse)
-	cc.Server.MatchMaking.FindMatch(response)
+	cc.Server.MatchMakingController.FindMatch(response)
 
 	responseJSON := <-response
 

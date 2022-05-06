@@ -14,25 +14,25 @@ type MatchFoundResponse struct {
 	PlayerColor string `json:"player_color" xml:"player_color"`
 }
 
-type MatchMaking struct {
+type MatchMakingController struct {
 	MatchRequests chan MatchRequest
-	Games         *ChessGames
+	Games         *ChessGamesController
 }
 
-func (m *MatchMaking) FindMatch(response chan<- MatchFoundResponse) {
+func (m *MatchMakingController) FindMatch(response chan<- MatchFoundResponse) {
 	request := MatchRequest{
 		Response: response,
 	}
 	m.MatchRequests <- request
 }
 
-func (m *MatchMaking) Run() {
+func (m *MatchMakingController) Run() {
 	for {
 		r1 := <-m.MatchRequests
 		r2 := <-m.MatchRequests
 
-		gameId := m.Games.AddNewGame()
-		gameInfo := m.Games.Games[gameId]
+		game := m.Games.AddNewGame()
+		gameId := game.GameId
 
 		/* Randomly assign colors */
 		var r1MatchFound MatchFoundResponse
@@ -41,27 +41,27 @@ func (m *MatchMaking) Run() {
 			r1MatchFound = MatchFoundResponse{
 				T:           "match_found",
 				GameId:      gameId,
-				PlayerId:    gameInfo.WhitePlayerId,
-				PlayerColor: "white",
+				PlayerId:    game.WhitePlayerId,
+				PlayerColor: "w",
 			}
 			r2MatchFound = MatchFoundResponse{
 				T:           "match_found",
 				GameId:      gameId,
-				PlayerId:    gameInfo.BlackPlayerId,
-				PlayerColor: "black",
+				PlayerId:    game.BlackPlayerId,
+				PlayerColor: "b",
 			}
 		} else {
 			r1MatchFound = MatchFoundResponse{
 				T:           "match_found",
 				GameId:      gameId,
-				PlayerId:    gameInfo.BlackPlayerId,
-				PlayerColor: "black",
+				PlayerId:    game.BlackPlayerId,
+				PlayerColor: "b",
 			}
 			r2MatchFound = MatchFoundResponse{
 				T:           "match_found",
 				GameId:      gameId,
-				PlayerId:    gameInfo.WhitePlayerId,
-				PlayerColor: "white",
+				PlayerId:    game.WhitePlayerId,
+				PlayerColor: "w",
 			}
 		}
 		r1.Response <- r1MatchFound
@@ -70,7 +70,7 @@ func (m *MatchMaking) Run() {
 	}
 }
 
-func (m *MatchMaking) Init(g *ChessGames) {
+func (m *MatchMakingController) Init(g *ChessGamesController) {
 	m.MatchRequests = make(chan MatchRequest)
 	m.Games = g
 }

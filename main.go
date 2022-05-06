@@ -11,7 +11,8 @@ func main() {
 	// Start Backend
 	var server chess_server.ChessServer
 	server.Init()
-	go server.MatchMaking.Run()
+	go server.MatchMakingController.Run()
+	go server.ChessGamesController.Run()
 
 	// Echo instance
 	e := echo.New()
@@ -28,7 +29,8 @@ func main() {
 
 	// Routes
 	e.GET("/find_match", chess_server.FindMatch)
-	e.GET("/chess_game", server.WSGameHandler)
+	e.GET("/play", server.WSHandler(server.PlayerLoop))
+	e.GET("/spectate", server.WSHandler(server.SpectateLoop))
 
 	// Start server
 	e.Logger.SetLevel(log.INFO)
