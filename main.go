@@ -4,13 +4,15 @@ import (
 	chess_server "github.com/SrsBusiness/chess_server/chess_server"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/log"
 )
 
 func main() {
 	// Start Backend
 	var server chess_server.ChessServer
 	server.Init()
-	go server.MatchMaking.Run()
+	go server.MatchMakingController.Run()
+	go server.ChessGamesController.Run()
 
 	// Echo instance
 	e := echo.New()
@@ -26,9 +28,11 @@ func main() {
 	e.Use(middleware.Recover())
 
 	// Routes
-	e.GET("/", chess_server.Hello)
 	e.GET("/find_match", chess_server.FindMatch)
+	e.GET("/play", server.WSHandler(server.PlayerLoop))
+	e.GET("/spectate", server.WSHandler(server.SpectateLoop))
 
 	// Start server
+	e.Logger.SetLevel(log.INFO)
 	e.Logger.Fatal(e.Start(":1323"))
 }
