@@ -82,11 +82,9 @@ func (c *WSController) WriteMarshal(update interface{}) error {
 	return c.Ws.WriteJSON(msg)
 }
 
-/*
- * Helper goroutines to abstract the WS as channels
- * This may be useful since channels are first class citizens
- */
+/* Closing ws *should* signal to the reader to return */
 func (c *WSController) WSReader() {
+	defer close(c.In)
 	for {
 		var inMsg GameUpdate
 		inMsg, t, err := c.ReadUnmarshal()
@@ -95,7 +93,6 @@ func (c *WSController) WSReader() {
 				GameUpdate
 				string
 			}{nil, "EOF"}
-			close(c.In)
 			return
 		}
 		c.In <- struct {
@@ -105,12 +102,25 @@ func (c *WSController) WSReader() {
 	}
 }
 
-func (c *WSController) WSWriter() {
-	for {
-		outMsg := <-c.Out
-		err := c.WriteMarshal(outMsg)
-		if err != nil {
-			return
+/* Close c.Out *should* signal to the writer to return */
+func (c *WSController) WSWriter(signal chan struct{}) {
+	terminate := false
+	for !terminate {
+		select {
+		case outMsg, ok := <-c.Out:
+			if !ok {
+				/* this is the normal return case */
+				c.Logger.Info("WS writer terminated normally")
+				terminate = true
+			} else {
+				err := c.WriteMarshal(outMsg)
+				if err != nil {
+					c.Logger.Error("WS write error. WS writer terminating...")
+					terminate = true
+				}
+			}
+		case <-signal:
+			terminate = true
 		}
 	}
 }

@@ -69,9 +69,9 @@ type ChessGame struct {
 		GameUpdate
 		string
 	}
-	WhitePlayerJoined bool
-	BlackPlayerJoined bool
-	SpectatorStreams  map[uint64]chan struct {
+	WhitePlayerConnected bool
+	BlackPlayerConnected bool
+	SpectatorStreams     map[uint64]chan struct {
 		GameUpdate
 		string
 	}
@@ -83,8 +83,20 @@ func (g *ChessGamesController) Init() {
 }
 
 type SpectatorJoinResponse struct {
-	SpectatorId uint64
-	Error       error
+	SpectatorId     uint64
+	SpectatorStream chan struct {
+		GameUpdate
+		string
+	}
+	Error error
+}
+
+type PlayerJoinResponse struct {
+	Stream chan struct {
+		GameUpdate
+		string
+	}
+	Error error
 }
 
 func (g *ChessGamesController) Run() {
@@ -97,14 +109,15 @@ func (g *ChessGamesController) Run() {
 			response <- g.addNewGame()
 		case GamePlayerJoinedUpdate:
 			playerJoinedUpdate := update.(GamePlayerJoinedUpdate)
-			response <- g.playerJoin(playerJoinedUpdate.GameId, playerJoinedUpdate.PlayerId)
+			stream, err := g.playerJoin(playerJoinedUpdate.GameId, playerJoinedUpdate.PlayerId)
+			response <- PlayerJoinResponse{Stream: stream, Error: err}
 		case GamePlayerLeftUpdate:
 			playerLeftUpdate := update.(GamePlayerLeftUpdate)
 			g.playerLeave(playerLeftUpdate.GameId, playerLeftUpdate.PlayerId)
 		case GameSpectatorJoinUpdate:
 			spectatorJoinUpdate := update.(GameSpectatorJoinUpdate)
-			spectatorId, err := g.spectatorJoin(spectatorJoinUpdate.GameId)
-			response <- SpectatorJoinResponse{SpectatorId: spectatorId, Error: err}
+			spectatorId, spectatorStream, err := g.spectatorJoin(spectatorJoinUpdate.GameId)
+			response <- SpectatorJoinResponse{SpectatorId: spectatorId, SpectatorStream: spectatorStream, Error: err}
 		case GameSpectatorLeftUpdate:
 			spectatorLeftUpdate := update.(GameSpectatorLeftUpdate)
 			g.spectatorLeave(spectatorLeftUpdate.GameId, spectatorLeftUpdate.SpectatorId)
@@ -125,16 +138,15 @@ func (g *ChessGamesController) AddNewGame() *ChessGame {
 	return game.(*ChessGame)
 }
 
-func (g *ChessGamesController) PlayerJoin(update GamePlayerJoinedUpdate) error {
+func (g *ChessGamesController) PlayerJoin(update GamePlayerJoinedUpdate) (chan struct {
+	GameUpdate
+	string
+}, error) {
 	response := make(chan interface{})
 	g.Requests <- ChessGamesControllerRequest{Update: update, Response: response}
-	err := <-response
+	ret := <-response
 	close(response)
-	if err != nil {
-		return err.(error)
-	} else {
-		return nil
-	}
+	return ret.(PlayerJoinResponse).Stream, ret.(PlayerJoinResponse).Error
 }
 
 func (g *ChessGamesController) PlayerLeave(update GamePlayerLeftUpdate) {
@@ -143,12 +155,15 @@ func (g *ChessGamesController) PlayerLeave(update GamePlayerLeftUpdate) {
 	close(response)
 }
 
-func (g *ChessGamesController) SpectatorJoin(update GameSpectatorJoinUpdate) (uint64, error) {
+func (g *ChessGamesController) SpectatorJoin(update GameSpectatorJoinUpdate) (uint64, chan struct {
+	GameUpdate
+	string
+}, error) {
 	response := make(chan interface{})
 	g.Requests <- ChessGamesControllerRequest{Update: update, Response: response}
-	spectatorId := <-response
+	ret := <-response
 	close(response)
-	return spectatorId.(SpectatorJoinResponse).SpectatorId, spectatorId.(SpectatorJoinResponse).Error
+	return ret.(SpectatorJoinResponse).SpectatorId, ret.(SpectatorJoinResponse).SpectatorStream, ret.(SpectatorJoinResponse).Error
 }
 
 func (g *ChessGamesController) SpectatorLeave(update GameSpectatorLeftUpdate) {
@@ -220,11 +235,13 @@ type GamePlayerLeftUpdate struct {
 	PlayerId uint64 `json:"player_id"`
 }
 
-/* TODO: think about rejoining after disconnect? */
-func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error {
+func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) (chan struct {
+	GameUpdate
+	string
+}, error) {
 	game := g.Games[gameId]
 	if playerId != game.WhitePlayerId && playerId != game.BlackPlayerId {
-		return errors.New("Invalid Player Id")
+		return nil, errors.New("Invalid Player Id")
 	}
 	playerJoinedUpdate := GamePlayerJoinedUpdate{
 		GameId:   gameId,
@@ -236,7 +253,7 @@ func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error 
 		FEN:    g.GetFEN(gameId),
 	}
 	if playerId == game.WhitePlayerId {
-		game.WhitePlayerJoined = true
+		game.WhitePlayerConnected = true
 		game.WhitePlayerStream = make(chan struct {
 			GameUpdate
 			string
@@ -245,9 +262,9 @@ func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error 
 			GameUpdate
 			string
 		}{snapshot, "snapshot_update"}
-	}
-	if playerId == game.BlackPlayerId {
-		game.BlackPlayerJoined = true
+		return game.WhitePlayerStream, nil
+	} else if playerId == game.BlackPlayerId {
+		game.BlackPlayerConnected = true
 		game.BlackPlayerStream = make(chan struct {
 			GameUpdate
 			string
@@ -256,8 +273,10 @@ func (g *ChessGamesController) playerJoin(gameId uint64, playerId uint64) error 
 			GameUpdate
 			string
 		}{snapshot, "snapshot_update"}
+		return game.BlackPlayerStream, nil
+	} else {
+		return nil, errors.New("Unreachable")
 	}
-	return nil
 }
 
 func (g *ChessGamesController) playerLeave(gameId uint64, playerId uint64) error {
@@ -269,14 +288,22 @@ func (g *ChessGamesController) playerLeave(gameId uint64, playerId uint64) error
 		GameId:   gameId,
 		PlayerId: playerId,
 	}
-	game.BroadcastUpdate(playerLeftUpdate, "player_left_update")
 	if playerId == game.WhitePlayerId {
 		close(game.WhitePlayerStream)
 		game.WhitePlayerStream = nil
+		game.WhitePlayerConnected = false
 	} else {
 		close(game.BlackPlayerStream)
 		game.BlackPlayerStream = nil
+		game.BlackPlayerConnected = false
 	}
+	game.BroadcastUpdate(playerLeftUpdate, "player_left_update")
+
+	/* If game is finished and all players and spectators have left, clean up */
+	if game.Finished() && !game.WhitePlayerConnected && !game.BlackPlayerConnected && len(game.SpectatorStreams) == 0 {
+		delete(g.Games, gameId)
+	}
+
 	return nil
 }
 
@@ -294,12 +321,15 @@ type GameSpectatorLeftUpdate struct {
 	SpectatorId uint64 `json:"spectator_id"`
 }
 
-func (g *ChessGamesController) spectatorJoin(gameId uint64) (uint64, error) {
+func (g *ChessGamesController) spectatorJoin(gameId uint64) (uint64, chan struct {
+	GameUpdate
+	string
+}, error) {
 	spectatorId := g.NextAvailSpectatorId
 	g.NextAvailSpectatorId += 1
 	game, ok := g.Games[gameId]
 	if !ok {
-		return 0, errors.New("Invalid GameId")
+		return 0, nil, errors.New("Invalid GameId")
 	}
 	spectatorStream := make(chan struct {
 		GameUpdate
@@ -319,7 +349,7 @@ func (g *ChessGamesController) spectatorJoin(gameId uint64) (uint64, error) {
 		GameUpdate
 		string
 	}{snapshot, "snapshot_update"}
-	return spectatorId, nil
+	return spectatorId, spectatorStream, nil
 }
 
 func (g *ChessGamesController) spectatorLeave(gameId uint64, spectatorId uint64) {
@@ -331,6 +361,10 @@ func (g *ChessGamesController) spectatorLeave(gameId uint64, spectatorId uint64)
 		SpectatorId: spectatorId,
 	}
 	game.BroadcastUpdate(spectatorLeftUpdate, "spectator_left")
+	/* If game is finished and all players and spectators have left, clean up */
+	if game.Finished() && !game.WhitePlayerConnected && !game.BlackPlayerConnected && len(game.SpectatorStreams) == 0 {
+		delete(g.Games, gameId)
+	}
 }
 
 func (g *ChessGamesController) Turn(gameId uint64) uint64 {
@@ -340,6 +374,10 @@ func (g *ChessGamesController) Turn(gameId uint64) uint64 {
 	} else {
 		return game.BlackPlayerId
 	}
+}
+
+func (g *ChessGame) Finished() bool {
+	return g.GameState.Outcome() != chess.NoOutcome
 }
 
 func (g *ChessGame) BroadcastUpdate(update GameUpdate, T string) {
@@ -388,13 +426,12 @@ func (g *ChessGamesController) makeMove(move GameMoveUpdate) error {
 	game.BroadcastUpdate(move, "move_update")
 
 	/* Check if game has ended - if so send a follow-up update */
-	if game.GameState.Outcome() != chess.NoOutcome {
+	if game.Finished() {
 		resultUpdate := GameResultUpdate{
 			Result: game.GameState.Outcome().String(),
 			FEN:    game.GameState.Position().String(),
 		}
 		game.BroadcastUpdate(resultUpdate, "result_update")
-		delete(g.Games, move.GameId)
 	}
 	return nil
 }
@@ -415,14 +452,14 @@ func (g *ChessGamesController) addNewGame() *ChessGame {
 	gameId := g.NextAvailGameId
 	g.NextAvailGameId += 1
 	newGame := ChessGame{
-		GameState:         chess.NewGame(),
-		GameId:            gameId,
-		WhitePlayerId:     g.NextAvailPlayerId,
-		BlackPlayerId:     g.NextAvailPlayerId + 1,
-		WhitePlayerStream: nil,
-		BlackPlayerStream: nil,
-		WhitePlayerJoined: false,
-		BlackPlayerJoined: false,
+		GameState:            chess.NewGame(),
+		GameId:               gameId,
+		WhitePlayerId:        g.NextAvailPlayerId,
+		BlackPlayerId:        g.NextAvailPlayerId + 1,
+		WhitePlayerStream:    nil,
+		BlackPlayerStream:    nil,
+		WhitePlayerConnected: false,
+		BlackPlayerConnected: false,
 		SpectatorStreams: make(map[uint64]chan struct {
 			GameUpdate
 			string
