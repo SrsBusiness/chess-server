@@ -3,9 +3,15 @@ package chess_server
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+)
+
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
 )
 
 type WSMessage struct {
@@ -79,6 +85,7 @@ func (c *WSController) WriteMarshal(update interface{}) error {
 	default:
 		return errors.New("Unsupported game update type")
 	}
+	c.Ws.SetWriteDeadline(time.Now().Add(writeWait))
 	return c.Ws.WriteJSON(msg)
 }
 
@@ -93,6 +100,7 @@ func (c *WSController) WSReader() {
 				GameUpdate
 				string
 			}{nil, "EOF"}
+			c.Logger.Info("WS closed normally. WS Reader terminating...")
 			return
 		}
 		c.In <- struct {
@@ -109,8 +117,7 @@ func (c *WSController) WSWriter(signal chan struct{}) {
 		select {
 		case outMsg, ok := <-c.Out:
 			if !ok {
-				/* this is the normal return case */
-				c.Logger.Info("WS writer terminated normally")
+				c.Logger.Error("WS Writer channel error. Terminating...")
 				terminate = true
 			} else {
 				err := c.WriteMarshal(outMsg)
@@ -120,6 +127,8 @@ func (c *WSController) WSWriter(signal chan struct{}) {
 				}
 			}
 		case <-signal:
+			c.Logger.Info("WS writer terminating normally")
+			c.Ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(writeWait))
 			terminate = true
 		}
 	}
