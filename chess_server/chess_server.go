@@ -48,19 +48,12 @@ func (s *ChessServer) PlayerLoop(
 	gameId := joinMsg.GameId
 	playerId := joinMsg.PlayerId
 
-	if err := gameController.PlayerJoin(joinMsg); err != nil {
+	gameUpdates, err := gameController.PlayerJoin(joinMsg)
+	if err != nil {
 		logger.Error(fmt.Sprintf("Could not join game %d as player %d: %s", gameId, playerId, err))
 		return
 	} else {
 		logger.Info(fmt.Sprintf("Player %d joined game %d", playerId, gameId))
-	}
-
-	gameUpdates, err := gameController.GetPlayerStream(gameId, playerId)
-	if err != nil {
-		logger.Error("Failed to connect to game state")
-		return
-	} else {
-		logger.Info(fmt.Sprintf("Player %d successfully connected to game %d", playerId, gameId))
 	}
 
 	defer gameController.PlayerLeave(GamePlayerLeftUpdate{GameId: gameId, PlayerId: playerId})
@@ -112,17 +105,13 @@ func (s *ChessServer) SpectateLoop(
 	}
 	joinMsg := clientUpdate.GameUpdate.(GameSpectatorJoinUpdate)
 
-	spectator_id, err := gameController.SpectatorJoin(joinMsg)
+	spectator_id, gameUpdates, err := gameController.SpectatorJoin(joinMsg)
 	if err != nil {
 		logger.Error("Could not spectate game: %s", err)
 		return
 	}
 	logger.Info(fmt.Sprintf("Spectator %d is now spectating game %d", spectator_id, joinMsg.GameId))
 	defer gameController.SpectatorLeave(GameSpectatorLeftUpdate{GameId: joinMsg.GameId, SpectatorId: spectator_id})
-	gameUpdates, err := gameController.GetSpectatorStream(joinMsg.GameId, spectator_id)
-	if err != nil {
-		logger.Error("Spectator could not connect to game %d: %s", joinMsg.GameId, err)
-	}
 	for {
 		select {
 		case update := <-gameUpdates:
@@ -159,6 +148,7 @@ func (s *ChessServer) WSHandler(f func(
 			string
 		})
 		wsOut := make(chan GameUpdate)
+		defer close(wsOut)
 		cc := c.(*ChessServerContext)
 		wsController := WSController{
 			Ws:     ws,
@@ -169,9 +159,15 @@ func (s *ChessServer) WSHandler(f func(
 
 		gameController := cc.Server.ChessGamesController
 
+		writerSignal := make(chan struct{})
+
 		go wsController.WSReader()
-		go wsController.WSWriter()
+		go wsController.WSWriter(writerSignal)
+
+		/* this function will signal to the reader that the session is finished */
 		f(&gameController, wsIn, wsOut, cc.Logger())
+		/* signal to writer to finish */
+		writerSignal <- struct{}{}
 		return nil
 	}
 }

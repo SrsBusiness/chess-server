@@ -3,9 +3,15 @@ package chess_server
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+)
+
+const (
+	// Time allowed to write a message to the peer.
+	writeWait = 10 * time.Second
 )
 
 type WSMessage struct {
@@ -79,14 +85,13 @@ func (c *WSController) WriteMarshal(update interface{}) error {
 	default:
 		return errors.New("Unsupported game update type")
 	}
+	c.Ws.SetWriteDeadline(time.Now().Add(writeWait))
 	return c.Ws.WriteJSON(msg)
 }
 
-/*
- * Helper goroutines to abstract the WS as channels
- * This may be useful since channels are first class citizens
- */
+/* Closing ws *should* signal to the reader to return */
 func (c *WSController) WSReader() {
+	defer close(c.In)
 	for {
 		var inMsg GameUpdate
 		inMsg, t, err := c.ReadUnmarshal()
@@ -95,7 +100,7 @@ func (c *WSController) WSReader() {
 				GameUpdate
 				string
 			}{nil, "EOF"}
-			close(c.In)
+			c.Logger.Info("WS closed normally. WS Reader terminating...")
 			return
 		}
 		c.In <- struct {
@@ -105,12 +110,26 @@ func (c *WSController) WSReader() {
 	}
 }
 
-func (c *WSController) WSWriter() {
-	for {
-		outMsg := <-c.Out
-		err := c.WriteMarshal(outMsg)
-		if err != nil {
-			return
+/* Close c.Out *should* signal to the writer to return */
+func (c *WSController) WSWriter(signal chan struct{}) {
+	terminate := false
+	for !terminate {
+		select {
+		case outMsg, ok := <-c.Out:
+			if !ok {
+				c.Logger.Error("WS Writer channel error. Terminating...")
+				terminate = true
+			} else {
+				err := c.WriteMarshal(outMsg)
+				if err != nil {
+					c.Logger.Error("WS write error. WS writer terminating...")
+					terminate = true
+				}
+			}
+		case <-signal:
+			c.Logger.Info("WS writer terminating normally")
+			c.Ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(writeWait))
+			terminate = true
 		}
 	}
 }
