@@ -101,6 +101,7 @@ func (c *WSController) WSReader() {
 				string
 			}{nil, "EOF"}
 			c.Logger.Info("WS closed normally. WS Reader terminating...")
+            c.Logger.Info(err)
 			return
 		}
 		c.In <- struct {

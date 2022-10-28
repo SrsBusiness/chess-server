@@ -18,7 +18,7 @@ type ChessServer struct {
 
 func (s *ChessServer) Init() {
 	s.ChessGamesController.Init()
-	s.MatchMakingController.Init(&s.ChessGamesController)
+	s.MatchMakingController.Init(&s.ChessGamesController.Events)
 }
 
 type ChessServerContext struct {
@@ -27,7 +27,7 @@ type ChessServerContext struct {
 }
 
 func (s *ChessServer) PlayerLoop(
-	gameController *ChessGamesController,
+	gameControllerChannel *ChessGamesControllerChannel,
 	wsIn <-chan struct {
 		GameUpdate
 		string
@@ -45,22 +45,22 @@ func (s *ChessServer) PlayerLoop(
 	}
 	joinMsg := clientUpdate.GameUpdate.(GamePlayerJoinedUpdate)
 
+    /* TODO: Use gameId to get the event stream for the game */
 	gameId := joinMsg.GameId
 	playerId := joinMsg.PlayerId
 
-	gameUpdates, err := gameController.PlayerJoin(joinMsg)
+	eventsIn, eventsOut, err := gameControllerChannel.PlayerJoin(joinMsg)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Could not join game %d as player %d: %s", gameId, playerId, err))
 		return
 	} else {
 		logger.Info(fmt.Sprintf("Player %d joined game %d", playerId, gameId))
 	}
-
-	defer gameController.PlayerLeave(GamePlayerLeftUpdate{GameId: gameId, PlayerId: playerId})
+	defer gameControllerChannel.PlayerLeave(GamePlayerLeftUpdate{GameId: gameId, PlayerId: playerId})
 
 	for {
 		select {
-		case update := <-gameUpdates:
+		case update := <-eventsOut:
 			wsOut <- update.GameUpdate
 			if update.string == "result_update" {
 				return
@@ -78,7 +78,7 @@ func (s *ChessServer) PlayerLoop(
 			moveUpdate := clientUpdate.GameUpdate.(GameMoveUpdate)
 			logger.Info(fmt.Sprintf("Player %d entered move %s", playerId, moveUpdate.Move))
 
-			if err := gameController.MakeMove(moveUpdate); err != nil {
+			if err := eventsIn.MakeMove(moveUpdate); err != nil {
 				logger.Error(fmt.Sprintf("Invalid move %s", err))
 				return
 			}
@@ -87,7 +87,7 @@ func (s *ChessServer) PlayerLoop(
 }
 
 func (s *ChessServer) SpectateLoop(
-	gameController *ChessGamesController,
+    gameControllerChannel *ChessGamesControllerChannel,
 	wsIn <-chan struct {
 		GameUpdate
 		string
@@ -105,13 +105,13 @@ func (s *ChessServer) SpectateLoop(
 	}
 	joinMsg := clientUpdate.GameUpdate.(GameSpectatorJoinUpdate)
 
-	spectator_id, gameUpdates, err := gameController.SpectatorJoin(joinMsg)
+	spectator_id, gameUpdates, err := gameControllerChannel.SpectatorJoin(joinMsg)
 	if err != nil {
 		logger.Error("Could not spectate game: %s", err)
 		return
 	}
 	logger.Info(fmt.Sprintf("Spectator %d is now spectating game %d", spectator_id, joinMsg.GameId))
-	defer gameController.SpectatorLeave(GameSpectatorLeftUpdate{GameId: joinMsg.GameId, SpectatorId: spectator_id})
+	defer gameControllerChannel.SpectatorLeave(GameSpectatorLeftUpdate{GameId: joinMsg.GameId, SpectatorId: spectator_id})
 	for {
 		select {
 		case update := <-gameUpdates:
@@ -129,7 +129,7 @@ func (s *ChessServer) SpectateLoop(
 }
 
 func (s *ChessServer) WSHandler(f func(
-	gameController *ChessGamesController,
+	gameController *ChessGamesControllerChannel,
 	wsIn <-chan struct {
 		GameUpdate
 		string
@@ -157,7 +157,7 @@ func (s *ChessServer) WSHandler(f func(
 			Logger: cc.Logger(),
 		}
 
-		gameController := cc.Server.ChessGamesController
+		gameControllerChannel := &cc.Server.ChessGamesController.Events
 
 		writerSignal := make(chan struct{})
 
@@ -165,7 +165,7 @@ func (s *ChessServer) WSHandler(f func(
 		go wsController.WSWriter(writerSignal)
 
 		/* this function will signal to the reader that the session is finished */
-		f(&gameController, wsIn, wsOut, cc.Logger())
+		f(gameControllerChannel, wsIn, wsOut, cc.Logger())
 		/* signal to writer to finish */
 		writerSignal <- struct{}{}
 		return nil

@@ -15,8 +15,8 @@ type MatchFoundResponse struct {
 }
 
 type MatchMakingController struct {
-	MatchRequests chan MatchRequest
-	Games         *ChessGamesController
+	MatchRequests       chan MatchRequest
+	NewGameRequests     *ChessGamesControllerChannel
 }
 
 func (m *MatchMakingController) FindMatch(response chan<- MatchFoundResponse) {
@@ -31,7 +31,7 @@ func (m *MatchMakingController) Run() {
 		r1 := <-m.MatchRequests
 		r2 := <-m.MatchRequests
 
-		game := m.Games.AddNewGame()
+		game := m.NewGameRequests.AddNewGame()
 		gameId := game.GameId
 
 		/* Randomly assign colors */
@@ -66,11 +66,10 @@ func (m *MatchMakingController) Run() {
 		}
 		r1.Response <- r1MatchFound
 		r2.Response <- r2MatchFound
-
 	}
 }
 
-func (m *MatchMakingController) Init(g *ChessGamesController) {
+func (m *MatchMakingController) Init(c *ChessGamesControllerChannel) {
 	m.MatchRequests = make(chan MatchRequest)
-	m.Games = g
+	m.NewGameRequests = c
 }
