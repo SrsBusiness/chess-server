@@ -56,12 +56,13 @@ func (s *ChessServer) PlayerLoop(
 	} else {
 		logger.Info(fmt.Sprintf("Player %d joined game %d", playerId, gameId))
 	}
-	defer gameControllerChannel.PlayerLeave(GamePlayerLeftUpdate{GameId: gameId, PlayerId: playerId})
+	defer eventsIn.PlayerLeave(GamePlayerLeftUpdate{GameId: gameId, PlayerId: playerId})
 
 	for {
 		select {
 		case update := <-eventsOut:
 			wsOut <- update.GameUpdate
+            logger.Info(update.string)
 			if update.string == "result_update" {
 				return
 			}
@@ -105,16 +106,16 @@ func (s *ChessServer) SpectateLoop(
 	}
 	joinMsg := clientUpdate.GameUpdate.(GameSpectatorJoinUpdate)
 
-	spectator_id, gameUpdates, err := gameControllerChannel.SpectatorJoin(joinMsg)
+	spectator_id, eventsIn, eventsOut, err := gameControllerChannel.SpectatorJoin(joinMsg)
 	if err != nil {
 		logger.Error("Could not spectate game: %s", err)
 		return
 	}
 	logger.Info(fmt.Sprintf("Spectator %d is now spectating game %d", spectator_id, joinMsg.GameId))
-	defer gameControllerChannel.SpectatorLeave(GameSpectatorLeftUpdate{GameId: joinMsg.GameId, SpectatorId: spectator_id})
+	defer eventsIn.SpectatorLeave(GameSpectatorLeftUpdate{GameId: joinMsg.GameId, SpectatorId: spectator_id})
 	for {
 		select {
-		case update := <-gameUpdates:
+		case update := <-eventsOut:
 			wsOut <- update.GameUpdate
 			if update.string == "result_update" {
 				return
